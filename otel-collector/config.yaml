@@ -1,0 +1,94 @@
+# otel-collector/config.yaml
+
+extensions:
+  bearertokenauth:
+    token: "${OTEL_TOKEN}"
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: "0.0.0.0:4318"
+        auth:
+          authenticator: bearertokenauth
+      grpc:
+        endpoint: "0.0.0.0:4317"
+        auth:
+          authenticator: bearertokenauth
+        tls:
+          cert_file: "/certs/otel-collector/otel-collector.crt"
+          key_file: "/certs/otel-collector/otel-collector.key"
+
+exporters:
+  debug:
+  otlphttp/elastic:
+    endpoint: ${ELASTIC_APM_URL}
+    tls:
+      insecure: true
+      # insecure_skip_verify: true
+      ca_file: "/certs/ca/ca.crt"
+    headers:
+      Authorization: "Bearer ${ELASTIC_APM_TOKEN}"
+  otlphttp/otel-lgtm:
+    endpoint: ${OTEL_LGTM_URL}
+  # otlphttp/newrelic:
+  #   endpoint: ${NEWRELIC_URL}
+  #   headers:
+  #     api-key: "${NEWRELIC_API_KEY}"
+
+processors:
+  batch:
+  tail_sampling:
+    policies: [
+      {
+        name: filter_http_url,
+        type: string_attribute,
+        string_attribute: {
+          key: http.target,
+          values: [ /metrics, /actuator/health, /swagger-ui.*, /v3/api-docs.*, /favicon.ico ],
+          enabled_regex_matching: true,
+          invert_match: true
+        }
+      },
+      {
+        name: filter_url_path,
+        type: string_attribute,
+        string_attribute: {
+          key: url.path,
+          values: [ /metrics, /actuator/health, /swagger-ui.*, /v3/api-docs.*, /favicon.ico ],
+          enabled_regex_matching: true,
+          invert_match: true
+        }
+      }
+    ]
+
+service:
+  extensions: [bearertokenauth]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [tail_sampling, batch]
+      exporters: [debug, otlphttp/elastic,otlphttp/otel-lgtm]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug,  otlphttp/elastic,otlphttp/otel-lgtm]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug,  otlphttp/elastic,otlphttp/otel-lgtm]
+# service:
+#   extensions: [bearertokenauth]
+#   pipelines:
+#     traces:
+#       receivers: [otlp]
+#       processors: [tail_sampling, batch]
+#       exporters: [debug, otlphttp/elastic, otlphttp/newrelic,otlphttp/otel-lgtm]
+#     metrics:
+#       receivers: [otlp]
+#       processors: [batch]
+#       exporters: [debug,  otlphttp/elastic, otlphttp/newrelic,otlphttp/otel-lgtm]
+#     logs:
+#       receivers: [otlp]
+#       processors: [batch]
+#       exporters: [debug,  otlphttp/elastic, otlphttp/newrelic,otlphttp/otel-lgtm]

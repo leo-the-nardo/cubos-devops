@@ -1,0 +1,16 @@
+.env
+*.crt
+*.key
+*.pem
+*.srl
+node_modules
+.data
+certs
+db_data
+.terraform
+terraform.tfstate
+terraform.tfstate.backup
+terraform.tfvars
+.terraform.lock.hcl
+logs
+values.tfvars

@@ -1,0 +1,92 @@
+server.host: "0.0.0.0"
+telemetry.enabled: "true"
+xpack.fleet.agents.enabled: true
+xpack.fleet.packages:
+  - name: fleet_server
+    version: latest
+  - name: system
+    version: latest
+  - name: elastic_agent
+    version: latest
+  - name: apm
+    version: latest
+xpack.fleet.agentPolicies:
+  - name: Fleet-Server-Policy
+    id: fleet-server-policy
+    namespace: default
+    monitoring_enabled: 
+      - logs
+      - metrics
+    package_policies:
+      - name: fleet_server-1
+        package:
+          name: fleet_server
+      - name: system-1
+        package:
+          name: system
+      - name: elastic_agent-1
+        package:
+          name: elastic_agent
+      - name: apm-1
+        package:
+          name: apm
+        inputs:
+        - type: apm
+          enabled: true
+          vars:
+          - name: host
+            value: 0.0.0.0:8200
+            frozen: true
+          - name: url
+            value: http://fleet-server:8200
+            frozen: true
+          - name: secret_token
+            value: ${ELASTIC_APM_SECRET_TOKEN}
+          # - name: tls_enabled
+          #   value: true
+          #   frozen: true
+          # - name: tls_certificate
+          #   value: /usr/share/kibana/config/certs/fleet-server/fleet-server.crt
+          #   frozen: true
+          # - name: tls_key
+          #   value: /usr/share/kibana/config/certs/fleet-server/fleet-server.key
+          #   frozen: true
+          # - name: tls_ca
+          #   value: /usr/share/kibana/config/certs/ca/ca.crt
+          #   frozen: true
+elasticsearch.ssl.certificateAuthorities: ["/usr/share/kibana/config/certs/ca/ca.crt"]
+elasticsearch.hosts: ["https://es01:9200"]
+xpack.fleet.outputs:
+  - id: elasticsearch
+    name: elasticsearch
+    type:  elasticsearch
+    hosts: ["https://es01:9200"]
+    ca_trusted_fingerprint:  "3DCCC5384CDF25EF2127607A8A6A69CBEC806923AB451BAE43EF066B90D8FE4A"
+    is_default: true
+    # editable by ui
+    config:
+      ssl:
+        certificate_authorities:
+          - |
+            -----BEGIN CERTIFICATE-----
+            MIIDSTCCAjGgAwIBAgIUA3fFn1/k4WiXnzcGNR/NdlziCTAwDQYJKoZIhvcNAQEL
+            BQAwNDEyMDAGA1UEAxMpRWxhc3RpYyBDZXJ0aWZpY2F0ZSBUb29sIEF1dG9nZW5l
+            cmF0ZWQgQ0EwHhcNMjQxMTIyMTAzMjEyWhcNMjcxMTIyMTAzMjEyWjA0MTIwMAYD
+            VQQDEylFbGFzdGljIENlcnRpZmljYXRlIFRvb2wgQXV0b2dlbmVyYXRlZCBDQTCC
+            ASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAKixAgJy6MiHBmSU/3IhRm11
+            u8BFo/Ux+EHcOKvbY4Lu3+nrQxsngT1cHOUjx7MrXl+XTeyQkJe6YtenvIzwKGDC
+            5sTQ4kg1y1EA+M0WmAY50U7p2ZKwGtlLutvsmAwAxTFWMWU/68UbPrVk+/+Qe/6n
+            2GbCkoWWG+Zc+bf6SKRFBC30e4lgwOqKSSbcmL+IWP6H/aPB4QWydz7qw5OFV7Hq
+            DwM9x/iM17BCIH0d8uUlXij921oC7N4CtL9kp60tKT8hT7GkP3WoZXqdKyEva/f7
+            Hr+hfLF41fbXS4K5ueVkdik6U1NaJzdChPzw8lAnXKqzVJhgu2StzStqchmcgREC
+            AwEAAaNTMFEwHQYDVR0OBBYEFMuWgvjEQvGE+vagAsZetZ8id1W8MB8GA1UdIwQY
+            MBaAFMuWgvjEQvGE+vagAsZetZ8id1W8MA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZI
+            hvcNAQELBQADggEBAFaPoe7iUK0rWZubSIA7QbApEXtM6GjviqX7LgbT29kh1BU0
+            VtREk/l/fPKPN/qsbHBV5nLvBggnKm3QX7xGUPEpE+MY+iuogXs7JXGxvRK7keSB
+            GRp0bu/MgUvy8nDkVQdQ//+U+Lk4WSc4nNSTkYyZFHHZ5ybx88vZnahrY6brYDXh
+            assasasaassaasasasasasssssssssssssssssssss/ujJgsBMgVFa6aqd6TutWg
+            a5hafMEwQZGC42dRd4UA0USYOWVheK/pSvN24aNH7TKYN6gGHUcaH2zrzDFBHOQm
+            oFI3kHHxNmcN5yUHWAT7fVQxGMy8NvTNDPGZwVo=
+            -----END CERTIFICATE-----
+# xpack.fleet.agents.elasticsearch.hosts: ["https://es01:9200"]
+# xpack.fleet.agents.elasticsearch.ca_trusted_fingerprint: "0A05233750219CC7A9367B8520330F117E3FE4A394FA315768FE506557C9B584"

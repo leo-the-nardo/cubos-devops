@@ -1,0 +1,58 @@
+# prometheus/alerts.yml
+
+groups:
+  - name: GoldenSignalsAlerts
+    rules:
+      - alert: HighBackendLatency
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 0.5
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High Backend Latency"
+          description: "The 95th percentile latency is above 0.5s for more than 2 minutes."
+
+      - alert: HighBackendErrorRate
+        expr: rate(http_errors_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High Backend Error Rate"
+          description: "Error rate is above 5% for more than 2 minutes."
+
+      - alert: HighBackendRequestRate
+        expr: rate(http_requests_total[1m]) > 100
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Backend Request Rate"
+          description: "Request rate is above 100 req/s for more than 2 minutes."
+
+      - alert: HighBackendCPUUsage
+        expr: process_cpu_seconds_total > 80
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High Backend CPU Usage"
+          description: "CPU usage is above 80% for more than 2 minutes."
+
+      - alert: HighDBQueryLatency
+        expr: rate(pg_stat_activity_query_duration_seconds_sum[5m])/rate(pg_stat_activity_query_duration_seconds_count[5m]) > 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High Database Query Latency"
+          description: "Average query duration is above 1s for more than 2 minutes."
+
+      - alert: HighDBErrorRate
+        expr: rate(pg_stat_activity_failed_queries_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High Database Error Rate"
+          description: "Database error rate is above 5% for more than 2 minutes."

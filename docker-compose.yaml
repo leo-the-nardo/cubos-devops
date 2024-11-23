@@ -1,0 +1,469 @@
+volumes:
+  certs:
+    driver: local
+  esdata01:
+    driver: local
+  kibanadata:
+    driver: local
+  metricbeatdata01:
+    driver: local
+  fleetserverdata:
+    driver: local
+
+networks:
+  web_net: # Web network (exposed to external users)
+    driver: bridge
+  app_net: # Application network (not exposed to users)
+    driver: bridge
+  data_net: # Data network (not internet access)
+    driver: bridge
+    internal: true
+
+services:
+  init:
+    build: ./init
+    restart: "no"
+    environment:
+      DB_USER: ${DB_USER}
+      DB_PASS: ${DB_PASS}
+      DB_NAME: ${DB_NAME}
+    depends_on:
+      - setup
+      - db
+    volumes:
+      - certs:/certs:rw
+      - ./database/migrations:/migrations:ro
+    networks:
+      - app_net
+      - data_net
+  db:
+    image: bitnami/postgresql:15
+    restart: always
+    environment:
+      POSTGRESQL_USERNAME: ${DB_USER}
+      POSTGRESQL_PASSWORD: ${DB_PASS}
+      POSTGRESQL_DATABASE: ${DB_NAME}
+      POSTGRESQL_TLS_CERT_FILE: /certs/postgres/postgres.crt
+      POSTGRESQL_TLS_KEY_FILE: /certs/postgres/postgres.key
+      POSTGRESQL_TLS_CA_FILE: /certs/ca/ca.crt
+      POSTGRESQL_ENABLE_TLS: "yes"
+    volumes:
+      - ./db_data:/var/lib/postgresql/data
+      - certs:/certs:rw
+    networks:
+      - data_net
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${DB_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    labels:
+      logging: "enabled"
+    depends_on:
+      setup:
+        condition: service_healthy
+
+  backend:
+    build: ./backend
+    restart: always
+    environment:
+      PORT: 3000
+      DB_USER: ${DB_USER}
+      DB_PASS: ${DB_PASS}
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME}
+      PGSSLCERT: /app/certs/cubos/cubos.crt
+      PGSSLKEY: /app/certs/cubos/cubos.key
+      PGSSLROOTCERT: /app/certs/ca/ca.crt
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: otlp
+      OTEL_LOGS_EXPORTER: otlp
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_COLLECTOR_URL}
+      OTEL_EXPORTER_OTLP_HEADERS: "Authorization=Bearer ${OTEL_TOKEN}" 
+      OTEL_RESOURCE_ATTRIBUTES: "service.name=cubos-backend,service.version=1.0.0,deployment.environment=production"
+      OTEL_NODE_RESOURCE_DETECTORS: "env,host,os"
+      NODE_EXTRA_CA_CERTS: /app/certs/ca/ca.crt
+      OTEL_SEMCONV_STABILITY_OPT_IN: http
+      OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION: base2_exponential_bucket_histogram
+      OTEL_LOG_LEVEL: debug
+      # OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION: explicit_bucket_histogram
+    depends_on:
+      db:
+        condition: service_healthy
+      init:
+        condition: service_started
+    volumes:
+      - certs:/app/certs:ro
+    networks:
+      - app_net
+      - data_net
+
+  nginx:
+    build:
+      context: ./nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - setup
+      - backend
+    volumes:
+      - certs:/etc/nginx/certs:ro
+    networks:
+      - web_net
+      - app_net
+
+
+  postgres-exporter:
+    image: bitnami/postgres-exporter:latest
+    environment:
+      DATA_SOURCE_NAME: postgresql://${DB_USER}:${DB_PASS}@db:5432/${DB_NAME}
+      PGSSLMODE: verify-full
+      PGSSLROOTCERT: /certs/ca/ca.crt
+      PGSSLCERT: /certs/cubos/cubos.crt
+      PGSSLKEY: /certs/cubos/cubos.key
+    volumes:
+      - certs:/certs:ro
+    # depends_on:
+    #   init:
+    #     condition: service_started
+    depends_on:
+      setup:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    networks:
+      - app_net
+      - data_net
+    command:
+      - '--no-collector.wal'  # Correct flag to disable WAL collector
+    labels:
+      logging: "enabled"
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.113.0
+    container_name: otel-collector
+    restart: unless-stopped
+    ports:
+      - "4317:4317"   # gRPC
+      - "4318:4318"   # HTTP
+    environment:
+      OTEL_TOKEN: ${OTEL_TOKEN}
+      ELASTIC_APM_URL: ${ELASTIC_APM_URL}
+      ELASTIC_APM_TOKEN: ${ELASTIC_APM_TOKEN}
+      NEWRELIC_API_KEY: ${NEWRELIC_API_KEY}
+      OTEL_LGTM_URL: ${OTEL_LGTM_URL} 
+      NEWRELIC_URL: ${NEWRELIC_URL}
+    volumes:
+      - ./otel-collector/config.yaml:/etc/otel/config.yaml:ro
+      - certs:/certs:ro
+    command:
+      --config /etc/otel/config.yaml
+    depends_on:
+      - setup
+      # - init
+      - db
+    networks:
+      - app_net
+
+
+  otel-lgtm:
+    image: grafana/otel-lgtm:latest
+    ports:
+      - "3000:3000"
+      # - "4317:4317"
+      - "9090:9090"
+    networks:
+      - app_net
+      - data_net
+    volumes:
+      - ./otel-lgtm/.data/grafana/data:/otel-lgtm/grafana/data
+      - ./otel-lgtm/.data/prometheus:/data/prometheus
+      - ./otel-lgtm/.data/loki:/loki
+
+      - ./otel-lgtm/grafana-datasources.yaml/:/otel-lgtm/grafana/conf/provisioning/datasources/grafana-datasources.yaml
+      - ./otel-lgtm/grafana-dashboards.yaml/:/otel-lgtm/grafana/conf/provisioning/dashboards/grafana-dashboards.yaml
+      # - ./otel-lgtm/grafana.ini:/otel-lgtm/grafana/conf/custom.ini
+      - ./otel-lgtm/dashboards-json:/otel-lgtm/dashboards-json
+
+      - ./otel-lgtm/loki-config.yaml:/otel-lgtm/loki-config.yaml
+      - ./otel-lgtm/otelcol-config.yaml:/otel-lgtm/otelcol-config.yaml
+      - ./otel-lgtm/prometheus.yaml:/otel-lgtm/prometheus.yaml
+      - ./otel-lgtm/tempo-config.yaml:/otel-lgtm/tempo-config.yaml
+    environment:
+      # GF_AUTH_ANONYMOUS_ENABLED: false
+      # GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      ENABLE_LOGS_GRAFANA: true
+      ENABLE_LOGS_LOKI: true
+      ENABLE_LOGS_OTELCOL: true
+      ENABLE_LOGS_TEMPO: true
+
+
+  es01:
+    depends_on:
+      setup:
+        condition: service_healthy
+    image: docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION}
+    labels:
+      co.elastic.logs/module: elasticsearch
+    volumes:
+      - certs:/usr/share/elasticsearch/config/certs
+      - esdata01:/usr/share/elasticsearch/data
+    ports:
+      - ${ES_PORT}:9200
+    environment:
+      - node.name=es01
+      - cluster.name=${CLUSTER_NAME}
+      - discovery.type=single-node
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=true
+      - xpack.security.http.ssl.key=certs/es01/es01.key
+      - xpack.security.http.ssl.certificate=certs/es01/es01.crt
+      - xpack.security.http.ssl.certificate_authorities=certs/ca/ca.crt
+      - xpack.security.transport.ssl.enabled=true
+      - xpack.security.transport.ssl.key=certs/es01/es01.key
+      - xpack.security.transport.ssl.certificate=certs/es01/es01.crt
+      - xpack.security.transport.ssl.certificate_authorities=certs/ca/ca.crt
+      - xpack.security.transport.ssl.verification_mode=certificate
+      - xpack.license.self_generated.type=${LICENSE}
+      - cluster.routing.allocation.disk.watermark.low=20mb
+      - cluster.routing.allocation.disk.watermark.high=15mb
+      - cluster.routing.allocation.disk.watermark.flood_stage=10mb
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    mem_limit: ${ES_MEM_LIMIT}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -s --cacert config/certs/ca/ca.crt https://localhost:9200 | grep -q 'missing authentication credentials'",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+    networks:
+      - data_net
+
+  kibana:
+    depends_on:
+      es01:
+        condition: service_healthy
+    image: docker.elastic.co/kibana/kibana:${STACK_VERSION}
+    labels:
+      co.elastic.logs/module: kibana
+    volumes:
+      - certs:/usr/share/kibana/config/certs
+      - kibanadata:/usr/share/kibana/data
+      - ./elk/kibana.yml:/usr/share/kibana/config/kibana.yml:ro
+      # - kibana_config:/usr/share/kibana/config
+    ports:
+      - ${KIBANA_PORT}:5601
+    environment:
+      - SERVERNAME=kibana
+      - ELASTICSEARCH_HOSTS=https://es01:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${KIBANA_PASSWORD}
+      - ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=/usr/share/kibana/config/certs/ca/ca.crt
+      - XPACK_SECURITY_ENCRYPTIONKEY=${ENCRYPTION_KEY}
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=${ENCRYPTION_KEY}
+      - XPACK_REPORTING_ENCRYPTIONKEY=${ENCRYPTION_KEY}
+      - XPACK_REPORTING_KIBANASERVER_HOSTNAME=localhost
+      - SERVER_SSL_ENABLED=true
+      - SERVER_SSL_CERTIFICATE=config/certs/kibana/kibana.crt
+      - SERVER_SSL_KEY=config/certs/kibana/kibana.key
+      - SERVER_SSL_CERTIFICATEAUTHORITIES=/usr/share/kibana/config/certs/ca/ca.crt
+      - ELASTIC_APM_SECRET_TOKEN=${ELASTIC_APM_SECRET_TOKEN}
+      - KIBANA_FLEET_CA=/usr/share/kibana/config/certs/ca/ca.crt
+    mem_limit: ${KB_MEM_LIMIT}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -I -s --cacert config/certs/ca/ca.crt https://localhost:5601 | grep -q 'HTTP/1.1 302 Found'",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+    networks:
+      - app_net
+      - data_net
+
+
+  setup:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION}
+    volumes:
+      - certs:/usr/share/elasticsearch/config/certs
+      - ./elk:/usr/share/kibana/config
+    user: "0"
+    command: >
+      bash -c '
+        if [ x${ELASTIC_PASSWORD} == x ]; then
+          echo "Set the ELASTIC_PASSWORD environment variable in the .env file";
+          exit 1;
+        elif [ x${KIBANA_PASSWORD} == x ]; then
+          echo "Set the KIBANA_PASSWORD environment variable in the .env file";
+          exit 1;
+        fi;
+        if [ ! -f config/certs/ca.zip ]; then
+          echo "Creating CA";
+          bin/elasticsearch-certutil ca --silent --pem -out config/certs/ca.zip;
+          unzip config/certs/ca.zip -d config/certs;
+        fi;
+        if [ ! -f config/certs/certs.zip ]; then
+          echo "Creating certs";
+          echo -ne \
+          "instances:\n"\
+          "  - name: es01\n"\
+          "    dns:\n"\
+          "      - es01\n"\
+          "      - localhost\n"\
+          "    ip:\n"\
+          "      - 127.0.0.1\n"\
+          "  - name: kibana\n"\
+          "    dns:\n"\
+          "      - kibana\n"\
+          "      - localhost\n"\
+          "    ip:\n"\
+          "      - 127.0.0.1\n"\
+          "  - name: fleet-server\n"\
+          "    dns:\n"\
+          "      - fleet-server\n"\
+          "      - localhost\n"\
+          "    ip:\n"\
+          "      - 127.0.0.1\n"\
+          "  - name: elastic-agent-apm\n"\
+          "    dns:\n"\
+          "      - elastic-agent-apm\n"\
+          "      - localhost\n"\
+          "    ip:\n"\
+          "      - 127.0.0.1\n"\
+          "  - name: otel-collector\n"\
+          "    dns:\n"\
+          "      - otel-collector\n"\
+          "      - localhost\n"\
+          "    ip:\n"\
+          "      - 127.0.0.1\n"\
+          "  - name: nginx\n"\
+          "    dns:\n"\
+          "      - nginx\n"\
+          "      - localhost\n"\
+          "    ip:\n"\
+          "      - 127.0.0.1\n"\
+          "  - name: postgres\n"\
+          "    dns:\n"\
+          "      - postgres\n"\
+          "      - db\n"\
+          "      - localhost\n"\
+          "    ip:\n"\
+          "      - 127.0.0.1\n"\
+          "  - name: cubos\n"\
+          "    dns:\n"\
+          "      - cubos\n"\
+          "      - localhost\n"\
+          "    ip:\n"\
+          "      - 127.0.0.1\n"\
+          > config/certs/instances.yml;
+          bin/elasticsearch-certutil cert --silent --pem -out config/certs/certs.zip --in config/certs/instances.yml --ca-cert config/certs/ca/ca.crt --ca-key config/certs/ca/ca.key;
+          unzip config/certs/certs.zip -d config/certs;
+        fi;
+        echo "Setting file permissions"
+        chown -R root:root config/certs;
+        find . -type d -exec chmod 750 \{\} \;;
+        find . -type f -exec chmod 640 \{\} \;;
+        echo "Updating ca_trusted_fingerprint in kibana.yml"
+
+        sed -i -e "/^\s*xpack\.fleet\.outputs:/,/^\s*xpack\./{
+          /^\s*-\s*id:\s*elasticsearch\s*$/,/^\s*-\s*id:/{
+            s/^\(\s*ca_trusted_fingerprint:\s*\).*/\1\"$(openssl x509 -fingerprint -sha256 -noout -in config/certs/ca/ca.crt | sed "s/.*=//;s/://g")\"/
+          }
+        }" /usr/share/kibana/config/kibana.yml;
+
+        echo "Waiting for Elasticsearch availability";
+        until curl -s --cacert config/certs/ca/ca.crt https://es01:9200 | grep -q "missing authentication credentials"; do sleep 30; done;
+        echo "Setting kibana_system password";
+        until curl -s -X POST --cacert config/certs/ca/ca.crt -u "elastic:${ELASTIC_PASSWORD}" -H "Content-Type: application/json" https://es01:9200/_security/user/kibana_system/_password -d "{\"password\":\"${KIBANA_PASSWORD}\"}" | grep -q "^{}"; do sleep 10; done;
+        echo "Extracting CA certificate SHA256 fingerprint"
+        echo "Updating xpack.fleet.agents.elasticsearch.ca_sha256 in kibana.yml"
+        CA_FINGERPRINT=$(openssl x509 -fingerprint -sha256 -noout -in config/certs/ca/ca.crt | sed "s/.*=//;s/://g")
+
+        echo "All done";
+        tail -f /dev/null
+      '
+    healthcheck:
+      test: ["CMD-SHELL", "[ -f config/certs/es01/es01.crt ]"]
+      interval: 7s
+      timeout: 5s
+      retries: 120
+    networks:
+      - data_net
+      - app_net
+
+  fleet-server:
+    depends_on:
+      kibana:
+        condition: service_healthy
+      es01:
+        condition: service_healthy
+    image: docker.elastic.co/beats/elastic-agent:${STACK_VERSION}
+    volumes:
+      - certs:/certs
+      - fleetserverdata:/usr/share/elastic-agent
+      - "/var/lib/docker/containers:/var/lib/docker/containers:ro"
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "/sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro"
+      - "/proc:/hostfs/proc:ro"
+      - "/:/hostfs:ro"
+    ports:
+      - ${FLEET_PORT}:8220
+      - ${APMSERVER_PORT}:8200
+    user: root
+    environment:
+      - SSL_CERTIFICATE_AUTHORITIES=/certs/ca/ca.crt
+      - CERTIFICATE_AUTHORITIES=/certs/ca/ca.crt
+      - FLEET_CA=/certs/ca/ca.crt
+      - FLEET_ENROLL=1
+      - FLEET_INSECURE=true
+      - FLEET_SERVER_ELASTICSEARCH_CA=/certs/ca/ca.crt
+      - FLEET_SERVER_ELASTICSEARCH_HOST=https://es01:9200
+      - FLEET_SERVER_ELASTICSEARCH_INSECURE=true
+      - FLEET_SERVER_ENABLE=1
+      - FLEET_SERVER_CERT=/certs/fleet-server/fleet-server.crt
+      - FLEET_SERVER_CERT_KEY=/certs/fleet-server/fleet-server.key
+      - FLEET_SERVER_INSECURE_HTTP=true
+      - FLEET_SERVER_POLICY_ID=fleet-server-policy
+      - FLEET_URL=https://fleet-server:8220
+      - KIBANA_FLEET_CA=/certs/ca/ca.crt
+      - KIBANA_FLEET_SETUP=1
+      - KIBANA_FLEET_USERNAME=elastic
+      - KIBANA_FLEET_PASSWORD=${ELASTIC_PASSWORD}
+      - KIBANA_HOST=https://kibana:5601
+    networks:
+      - app_net
+      - data_net
+  # filebeat:
+  #   image: docker.elastic.co/beats/filebeat:${STACK_VERSION}
+  #   volumes:
+  #     - ./elk/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+  #     - /var/lib/docker/containers:/var/lib/docker/containers:ro
+  #     - /var/run/docker.sock:/var/run/docker.sock:ro
+  #     - certs:/etc/filebeat/certs:ro
+  #     - ./elk/filebeat/logs:/var/log/filebeat  # Mount log directory
+  #   networks:
+  #     - data_net
+  #     - app_net
+  #   environment:
+  #     ELASTICSEARCH_URL: ${ELASTICSEARCH_URL}
+  #     ELASTICSEARCH_FILEBEAT_APIKEY: ${ELASTICSEARCH_FILEBEAT_APIKEY}
+  #   depends_on:
+  #     setup:
+  #       condition: service_healthy

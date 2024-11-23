@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Desafio Técnico | DevOps</title>
+    <!-- <script src="https://cdn.jsdelivr.net/npm/@elastic/apm-rum@5.16.0/dist/bundles/elastic-apm-rum.umd.min.js"></script> -->
+    <script>
+      // var apm = elasticApm.init({
+      //   serviceName: "cubos-frontend",
+      //   serverUrl: "https://apm.cloudificando.com",
+      //   environment: "production",
+      //   serviceVersion: "1.0.0",
+      //   distributedTracingOrigins: [
+      //     "https://localhost:443",
+      //     "https://localhost",
+      //     "http://localhost",
+      //     "http://localhost:3000",
+      //     "https://localhost:443/api",
+      //     "https://localhost/api",
+      //     "http://backend:3000",
+      //     "https://192.168.3.31",
+      //     "http://192.168.3.31/api",
+      //     "https://nginx",
+      //     "http://nginx",
+      //     "http://nginx:3000",
+      //     "https://nginx:3000",
+      //     "http://localhost:3000",
+      //     "https://localhost:3000",
+      //     "http://localhost:3000/api",
+      //     "https://localhost:3000/api",
+      //     "http://backend:3000/api",
+      //     "https://backend:3000/api",
+      //     "https://backend:3000",
+      //     "https://192.168.3.31/api",
+      //     "/https?:\/\/localhost:\d{4}/",
+      //     "/https?:\/\/localhost:\d{4}\/api/",
+      //     "https://naruto.corp",
+      //     "http://naruto.corp",
+      //     "http://naruto.corp:3000",
+      //     "https://naruto.corp:443",
+      //     "http://naruto.corp:443",
+      //     "https://naruto.corp/api",
+      //     "http://naruto.corp/api",
+      //     "http://naruto.corp:3000/api",
+      //     "https://naruto.corp:443/api",
+      //     "http://naruto.corp:443/api",
+      //     "https://localhost",
+      //     "http://localhost",
+      //     "http://backend:3000/api"
+      //   ],
+      //   propagateTracestate: true,
+      //   transactionSampleRate: 1.0,
+      //   distributedTracing: true,
+      // });
+    </script>
+    
+    <style>
+      *,
+      html {
+        margin: 0;
+        padding: 0;
+        border: 0;
+      }
+
+      html {
+        width: 100%;
+        height: 100%;
+      }
+
+      body {
+        width: 100%;
+        height: 100%;
+        background-image: linear-gradient(to right, rgb(24, 54, 105), rgb(146, 39, 143));
+
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+      }
+
+      h1, p, h2, button {
+        color: white;
+        font-family: 'Lato', sans-serif;
+        padding: 10px;
+      }
+
+      button {
+        transition-duration: 0.4s;
+        border: 2px solid rgb(38, 46, 64);
+        background-color: transparent;
+        padding: 12px 28px;
+      }
+
+      .disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      button:hover {
+        background-color: rgb(38, 46, 64);
+      }
+
+      h1 {
+        font-size: 128px;
+      }
+
+      p {
+        font-size: 48px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Desafio Técnico - DevOps</h1>
+    <p>Aborda conceitos de Terraform, Docker e Redes.</p>
+    <button onclick="fetchAPI()">Verificar Backend e Banco</button>
+    <script>
+      async function fetchAPI() {
+        const result = await fetch("/api/", { mode: 'cors' })
+          .then(response => response.json())
+
+        if (result?.database) {
+          const h2 = document.createElement("h2");
+          h2.innerHTML = "Database is up";
+          document.body.appendChild(h2);
+        }
+
+        if (result?.userAdmin) {
+          const h2 = document.createElement("h2");
+          h2.innerHTML = "Migration runned";
+          document.body.appendChild(h2);
+        }
+
+        if (result?.database && result?.userAdmin) {
+          const button = document.querySelector("button");
+          button.disabled = true;
+          button.classList.add("disabled");
+        }
+      }
+    </script>
+  </body>
+</html>

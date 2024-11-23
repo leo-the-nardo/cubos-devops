@@ -1,0 +1,50 @@
+# elastic-agent/config/elastic-agent.yml
+
+outputs:
+  default:
+    type: elasticsearch
+    hosts: ["https://es01:9200"]
+    username: "elastic"
+    password: "${ELASTIC_PASSWORD}"
+    ssl:
+      certificate_authorities: ["/usr/share/elastic-agent/certs/ca/ca.crt"]
+      certificate: "/usr/share/elastic-agent/certs/elastic-agent-apm/elastic-agent-apm.crt"
+      key: "/usr/share/elastic-agent/certs/elastic-agent-apm/elastic-agent-apm.key"
+      verification_mode: "none"
+
+agent.monitoring:
+  enabled: true
+  use_output: default
+  logs: true
+  metrics: true
+
+inputs:
+  - id: apm-server
+    name: apm-server
+    revision: 1
+    type: apm
+    use_output: default
+    meta:
+      package:
+        name: apm
+        version: "${STACK_VERSION}"
+    data_stream:
+      namespace: default
+    server:
+      host: "0.0.0.0:8200"
+      ssl:
+        enabled: true
+        certificate: "/usr/share/elastic-agent/certs/elastic-agent-apm/elastic-agent-apm.crt"
+        key: "/usr/share/elastic-agent/certs/elastic-agent-apm/elastic-agent-apm.key"
+      secret_token: "${ELASTIC_APM_SECRET_TOKEN}"
+    apm-server:
+      otlp:
+        enabled: true
+        protocols:
+          http:
+            enabled: true
+          grpc:
+            enabled: true
+    rum:
+      enabled: true
+      allow_origins: ["*"]
